@@ -3,7 +3,13 @@ uvicorn[standard]==0.27.1
 anthropic==0.21.3
 openai==1.14.0
 google-generativeai==0.4.1
-faster-whisper==1.0.1
+# faster-whisper pulls in PyAV as a transitive dep. Pinning it here to a
+# version with prebuilt wheels on Windows/macOS/Linux avoids pip falling
+# back to a from-source build that needs ffmpeg's *-dev headers (libavformat
+# etc.) -- those aren't present on GitHub-hosted runners or most dev
+# machines by default. See docs/memory.md.
+av>=12.3.0
+faster-whisper==1.0.3
 sounddevice==0.4.6
 numpy==1.26.4
 pydantic==2.6.3
