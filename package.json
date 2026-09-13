@@ -1,0 +1,57 @@
+{
+  "name": "wisp",
+  "version": "0.1.0",
+  "description": "Open-source, cross-platform real-time AI overlay assistant",
+  "main": "dist/main/main.js",
+  "license": "MIT",
+  "author": "",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "tsc -p tsconfig.main.json --watch --preserveWatchOutput & electron .",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "build:backend": "node scripts/build-backend.js",
+    "build:app": "npm run build:backend && npm run build && electron-builder",
+    "build:mac": "npm run build:backend && npm run build && electron-builder --mac",
+    "build:win": "npm run build:backend && npm run build && electron-builder --win",
+    "build:linux": "npm run build:backend && npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.9.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12"
+  },
+  "build": {
+    "appId": "com.wisp.app",
+    "productName": "Wisp",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": "dist-backend/wisp-backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg"],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist"
+    },
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["AppImage", "deb"], "category": "Utility" }
+  }
+}
