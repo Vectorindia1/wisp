@@ -17,6 +17,34 @@ Format per entry:
 
 ---
 
+## 2026-09-15 (session 5 — Claude Code): BYOK settings UI + real Windows .exe shipped
+**Done:**
+- **First real CI-built installers exist and were downloaded/verified**: `Wisp Setup 0.1.0.exe` (110.6 MB, confirmed via `file` as a genuine PE32 NSIS installer), plus macOS `.dmg` and Linux `.AppImage`/`.deb`, all from `.github/workflows/build.yml` run 34774866718 on github.com/Vectorindia1/wisp
+- Fixed 2 real CI bugs found getting there (both now in docs/memory.md): the `av`/PyAV wheel pin, and electron-builder's `publish:null`/`author.email` requirements
+- **BYOK settings UI, fully built and verified live**: new `Settings.tsx` window (separate framed BrowserWindow, not part of the invisible overlay) with provider picker (Anthropic/OpenAI/Gemini/OpenRouter/Ollama), API key input per provider, Ollama base-URL field, Save button
+- Settings persist to `userData/settings.json` (`src/main/settings.ts`) and get translated to env vars for the spawned backend (`settingsToEnv()`) -- **verified end-to-end via UI automation**: clicked OpenRouter radio, typed a test key, clicked Save, confirmed via `/proc/<pid>/environ` that the newly-spawned backend process actually received `WISP_PROVIDER=openrouter` and `OPENROUTER_API_KEY=...`
+- First-run UX: Settings window auto-opens if no API key is configured for the selected provider, instead of leaving a silently-broken overlay
+- Added system tray icon (Settings.../Toggle overlay/Quit menu) and a gear button inside the overlay itself, both opening the same Settings window
+- Added **Gemini** and **OpenRouter** providers (`backend/providers/gemini_provider.py`, `openrouter_provider.py`) -- Gemini was advertised in the PRD/requirements.txt but never actually implemented until now; OpenRouter added per this session's request (reuses the `openai` SDK against OpenRouter's OpenAI-compatible endpoint, one key/many models)
+- Generated a real app icon (`build/icon.png`, `scripts/generate_icon.py` -- a wisp/spiral mark on a dark gradient) instead of shipping with Electron's default icon; wired into `electron-builder`'s `icon` config and as a runtime extraResource for the tray icon
+- **Found and fixed a real production bug independent of this session's feature work**: whisper transcription auto-start used `subprocess.Popen([sys.executable, ...])`, which is broken inside every PyInstaller-frozen backend (sys.executable there is the frozen binary itself, not a python.exe) -- silently produced a zombie process in every packaged build to date. Rewrote as an in-process background thread (`whisper_stream.run()` now takes an `on_transcript` callback + `threading.Event`)
+- Found and fixed a second bug introduced while fixing the first: hoisting the whisper import to module level meant a missing `sounddevice`/`faster-whisper` install would crash the *entire* backend at startup, not just disable transcription. Made the import lazy, scoped inside the try/except that already handles "audio unavailable"
+- All of the above verified together in one final live run: packaged app launched, backend came up (whisper gracefully disabled with a clear log line, since this dev sandbox is missing `sounddevice`), overlay + Settings windows both rendered, screenshotted via `xwd`+netpbm for visual confirmation
+
+**In progress:**
+- Nothing — rebuilding CI with all of today's fixes is the very next action after this log entry
+
+**Broken / blocked:**
+- This dev sandbox runs Python 3.14 (too new for `av` to have a prebuilt wheel), so whisper transcription could NOT be verified working end-to-end *here* -- only that it degrades gracefully when unavailable. Real verification needs the CI-built Windows/macOS installer's own logs, or a normal (3.10-3.12) local Python.
+- Settings UI has no model picker yet (OpenRouter's model is env-var-only, `WISP_OPENROUTER_MODEL`) and no way to toggle `WISP_WHISPER_ENABLED` from the UI -- both `.env`-only for now
+- No OS keychain integration for the API key -- `settings.json` is plaintext, acceptable for a local single-user tool per docs/memory.md but worth flagging if this ever becomes multi-user
+
+**Next up (priority order):**
+1. Push these fixes, rebuild CI, download + hand the user the updated Windows `.exe` with BYOK
+2. Phase 0 (still outstanding across 3 sessions now): verify `setContentProtection` against a real Zoom/Meet screen share -- needs a human on real Windows/macOS hardware, cannot be done from any sandbox
+3. Model picker in Settings for OpenRouter/Ollama, and a `WISP_WHISPER_ENABLED` toggle in the UI instead of `.env`-only
+4. Mobile: user has flagged converting this to an APK for mobile as the next major milestone after the desktop app is solid -- worth a design discussion first, since the whole architecture (Electron overlay + screen-capture-exclusion APIs) is desktop-OS-specific and doesn't port directly to Android/iOS
+
 ## 2026-09-13 (session 4 — Claude Code): packaged as a standalone executable
 **Done:**
 - **Backend now bundles into a standalone executable via PyInstaller** (`backend/wisp_backend.spec` + `scripts/build-backend.js`) — end users no longer need Python installed at all

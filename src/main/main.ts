@@ -1,10 +1,14 @@
-import { app, BrowserWindow, globalShortcut, desktopCapturer, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, desktopCapturer, ipcMain, screen, Tray, Menu, nativeImage } from 'electron';
 import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
 import http from 'http';
+import { loadSettings, saveSettings, settingsToEnv, hasApiKeyConfigured, WispSettings } from './settings';
 
 let overlayWindow: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let backendProcess: ChildProcess | null = null;
+let currentSettings: WispSettings = loadSettings();
 
 const BACKEND_URL = process.env.WISP_BACKEND_URL || 'http://127.0.0.1:8137';
 
@@ -25,6 +29,11 @@ function startBundledBackend() {
   backendProcess = spawn(exePath, [], {
     cwd: path.dirname(exePath),
     windowsHide: true,
+    // BYOK: the provider/playbook/API keys the user set in the Settings
+    // window get here as env vars -- see settings.ts's settingsToEnv().
+    // The backend's own env vars (PATH etc.) must still flow through, so
+    // this is layered over process.env, not a replacement for it.
+    env: { ...process.env, ...settingsToEnv(currentSettings) },
   });
 
   backendProcess.stdout?.on('data', (d) => console.log(`[backend] ${d}`));
@@ -40,6 +49,16 @@ function stopBundledBackend() {
     backendProcess.kill();
     backendProcess = null;
   }
+}
+
+// Called after Settings are saved so a new/changed API key or provider
+// takes effect immediately instead of requiring the user to know to
+// relaunch the app. No-op in dev mode, same reasoning as startBundledBackend.
+async function restartBundledBackend() {
+  if (!app.isPackaged) return;
+  stopBundledBackend();
+  startBundledBackend();
+  await waitForBackend().catch((e) => console.error('[wisp] Backend restart did not come up healthy:', e));
 }
 
 // The bundled backend takes a moment to bind its port after spawn. Poll
@@ -106,12 +125,69 @@ function createOverlayWindow() {
   }
 }
 
-function registerHotkeys() {
-  // Toggle overlay visibility
-  globalShortcut.register('CommandOrControl+\\', () => {
-    if (!overlayWindow) return;
-    overlayWindow.isVisible() ? overlayWindow.hide() : overlayWindow.show();
+// Separate, normal (non-transparent, framed) window for Settings -- deliberately
+// distinct from the overlay so it's unambiguous this is a "real" app window,
+// not part of the invisible-to-screen-share surface. It does NOT get
+// setContentProtection: you want to see your own settings when configuring them.
+function openSettingsWindow() {
+  if (settingsWindow) {
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 480,
+    height: 640,
+    title: 'Wisp Settings',
+    resizable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
   });
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    settingsWindow.loadURL(`${devServerUrl}/settings.html`);
+  } else {
+    settingsWindow.loadFile(path.join(__dirname, '../renderer/settings.html'));
+  }
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
+  });
+}
+
+function createTray() {
+  const iconPath = path.join(process.resourcesPath, 'build', 'icon.png');
+  let icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    // Dev mode: resourcesPath doesn't contain our build/ dir the way a
+    // packaged app's does. Fall back to the repo-relative copy instead of
+    // showing a blank tray icon during `npm run dev`.
+    icon = nativeImage.createFromPath(path.join(__dirname, '../../build/icon.png'));
+  }
+  tray = new Tray(icon.resize({ width: 22, height: 22 }));
+  tray.setToolTip('Wisp');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Settings…', click: () => openSettingsWindow() },
+      { label: 'Toggle overlay (Ctrl+\\)', click: () => toggleOverlay() },
+      { type: 'separator' },
+      { label: 'Quit Wisp', click: () => app.quit() },
+    ])
+  );
+}
+
+function toggleOverlay() {
+  if (!overlayWindow) return;
+  overlayWindow.isVisible() ? overlayWindow.hide() : overlayWindow.show();
+}
+
+function registerHotkeys() {
+  globalShortcut.register('CommandOrControl+\\', toggleOverlay);
 
   // Trigger capture: screenshot + rolling transcript -> backend -> streamed response
   globalShortcut.register('CommandOrControl+Enter', async () => {
@@ -142,6 +218,14 @@ async function triggerCapture() {
 }
 
 ipcMain.handle('backend:url', () => BACKEND_URL);
+ipcMain.handle('settings:get', () => currentSettings);
+ipcMain.handle('settings:save', async (_event, next: WispSettings) => {
+  currentSettings = next;
+  saveSettings(next);
+  await restartBundledBackend();
+  return { ok: true };
+});
+ipcMain.handle('settings:open', () => openSettingsWindow());
 
 app.whenReady().then(async () => {
   startBundledBackend();
@@ -150,15 +234,21 @@ app.whenReady().then(async () => {
     try {
       await waitForBackend();
     } catch (e) {
-      // Surfacing this as a dialog (rather than a silently blank overlay) is
-      // a settings-UI-milestone TODO -- for now it's at least visible in the
-      // packaged app's log file instead of failing every capture forever.
       console.error('[wisp] Backend failed to start:', e);
     }
   }
 
   createOverlayWindow();
+  createTray();
   registerHotkeys();
+
+  // First run (or any run with no key set for the chosen provider): open
+  // Settings automatically instead of leaving the user staring at an
+  // overlay that will silently fail on every capture. Ollama needs no key,
+  // so it's exempt (see hasApiKeyConfigured).
+  if (!hasApiKeyConfigured(currentSettings)) {
+    openSettingsWindow();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createOverlayWindow();
@@ -171,5 +261,10 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
+  // Overlay has skipTaskbar + no explicit close button, and Settings closing
+  // shouldn't quit the whole app (the tray icon is the app's real "still
+  // running" indicator) -- only quit here on non-macOS if literally every
+  // window (including a hidden-but-destroyed overlay) is gone, mirroring
+  // the original behavior.
   if (process.platform !== 'darwin') app.quit();
 });

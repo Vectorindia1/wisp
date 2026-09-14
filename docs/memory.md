@@ -37,6 +37,31 @@ Format:
 **Decision/finding:** `StreamingResponse` sends headers (status 200) before the generator body runs. By the time a provider SDK raises (`AuthenticationError`, rate limits, network errors), it's too late to change the status code — the exception just kills the stream. Fixed by wrapping the generator body in try/except and yielding a `[wisp error] ...` text chunk instead of letting the exception propagate.
 **Implication for future work:** Any new provider or new streaming endpoint must follow the same pattern — catch inside the generator, never let a provider exception escape a `StreamingResponse` body uncaught. Otherwise failures are invisible to the person actually using the overlay in the moment they need it most.
 
+### PyInstaller does not cross-compile
+**Context:** Tried to produce a Windows `.exe` for the bundled backend from a Linux dev sandbox.
+**Decision/finding:** PyInstaller only ever produces a binary for the OS/arch it's *running on* — there is no `--target-platform windows` equivalent. A Linux machine can only build a Linux `wisp-backend`; the real `wisp-backend.exe` must be built by a process actually running on Windows.
+**Implication for future work:** `.github/workflows/build.yml`'s CI matrix (windows-latest/macos-latest/ubuntu-latest) is not a nice-to-have here, it's the only way to produce all 3 platforms' backends without owning 3 physical/VM machines. Never try to "just build it for Windows" from Linux again — go straight to CI or a real Windows box.
+
+### `faster-whisper`'s transitive `av` (PyAV) pin needs to be overridden for CI
+**Context:** First CI run failed identically on all 3 platforms at `pip install -r backend/requirements.txt` — PyAV tried to compile from source and needed `libavformat` etc. dev headers that hosted runners don't have.
+**Decision/finding:** `faster-whisper==1.0.1`'s resolved `av` version had no prebuilt wheel for the runners' Python (3.11). Explicitly pinning `av>=12.3.0` (verified against PyPI's file listing to have `cp311` wheels for win_amd64/macosx/manylinux before pushing) fixed it, and it satisfies faster-whisper's own `av<13,>=11.0` constraint.
+**Implication for future work:** Before bumping `faster-whisper` again, re-verify its resolved `av` version still has prebuilt wheels for whatever Python version CI uses — pin `av` explicitly rather than trusting the transitive resolution.
+
+### electron-builder needs `publish:null` and `author.email` explicitly, even without a GitHub release
+**Context:** Second CI run got much further (Windows/macOS actually built `Wisp Setup 0.1.0.exe` / the `.dmg`) but then failed with "GitHub Personal Access Token is not set". Linux failed separately and earlier with "Please specify author 'email'".
+**Decision/finding:** electron-builder auto-detects a CI environment and tries to publish a GitHub release unless `"publish": null` is set in the build config — even when nothing asked it to publish. Separately, the `.deb` target specifically requires `author.email` in package.json (an empty string author isn't enough).
+**Implication for future work:** Both of these look like real build failures but are pure config gaps. If a *packaging* step fails right at the end after the artifact clearly already got built (check the log for "building block map" succeeding first), suspect one of these two before anything else.
+
+### A subprocess launched via `sys.executable` is broken inside a PyInstaller-frozen backend
+**Context:** Whisper transcription auto-start used `subprocess.Popen([sys.executable, "whisper_stream.py", ...])`, mirroring how a developer would run it manually. Worked in dev; inside the packaged app the process appeared then immediately zombied.
+**Decision/finding:** Inside a frozen PyInstaller executable, `sys.executable` points at the frozen binary itself (there's no separate bundled `python.exe`) — it can't be re-invoked with a script path argument the way a real Python interpreter can. Fixed by running the whisper loop on a `threading.Thread` in the same process instead of a subprocess; `whisper_stream.run()` now takes an `on_transcript` callback + a `threading.Event` to stop, and is only imported lazily inside the function that starts it.
+**Implication for future work:** Never spawn `sys.executable` as if it's a generic interpreter from code that might run frozen. If a feature genuinely needs a separate OS process once packaged, it needs its own PyInstaller spec/executable, not a `sys.executable` shortcut.
+
+### Optional native-dependency imports must stay lazy, not module-level
+**Context:** While fixing the subprocess-vs-thread issue above, the whisper import got hoisted to the top of `main.py` for a moment. In a sandbox where `sounddevice` wasn't actually installed, this took down the *entire* backend at startup (`ModuleNotFoundError` before FastAPI even started) — including the core screenshot->LLM loop, which has nothing to do with audio.
+**Decision/finding:** `import transcription.whisper_stream` must happen *inside* `_start_transcription_thread()`, guarded by the same try/except that already handles "audio just isn't available on this machine." A module-level import turns "optional feature unavailable" into "whole app won't start."
+**Implication for future work:** Any dependency that isn't installed on every platform/environment (native audio, video, GPU libs) needs its import deferred to the function that actually uses it, wrapped in try/except — never at module scope in `main.py`.
+
 ---
 
 ## Open architecture questions not yet resolved

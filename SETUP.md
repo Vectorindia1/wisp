@@ -118,32 +118,40 @@ Or run it on demand from the Actions tab (`workflow_dispatch`). Download the
 - **`src/main/main.ts`**: Electron main process — window management, global hotkeys, screenshot capture
 - **`src/renderer/Overlay.tsx`**: React component for the overlay UI — streaming display, styling
 - **`backend/main.py`**: FastAPI server — /capture endpoint handles LLM streaming
-- **`backend/providers/`**: LLM provider abstractions (Anthropic, OpenAI, Ollama, Gemini)
+- **`backend/providers/`**: LLM provider abstractions (Anthropic, OpenAI, Gemini, OpenRouter, Ollama)
 - **`backend/context/`**: Transcript buffer (rolling window) and playbook loader
-- **`backend/transcription/`**: Whisper integration (currently stubbed — needs auto-startup)
+- **`backend/transcription/`**: Whisper integration — runs on an in-process background thread, auto-started by `main.py`'s lifespan hook (see docs/memory.md for why it's a thread, not a subprocess)
 - **`playbooks/`**: JSON files with system prompts (general.json is default)
+- **`src/main/settings.ts`**: BYOK settings persistence (`userData/settings.json`) + env-var translation for the spawned backend
+- **`src/renderer/Settings.tsx`**: Settings window UI — provider picker, API key input, Ollama URL
 
 ## Known Issues / TODOs
 
-### Phase 0 — Verification (untested in real conditions)
+### Phase 0 — Verification (still unresolved after 5 sessions — needs a human on real hardware)
 - [ ] `setContentProtection(true)` actually excludes overlay from Zoom/Meet screen share on Windows & macOS
 - [ ] Overlay window appears at correct z-order (always-on-top, above fullscreen)
 - [ ] Screenshot capture produces usable image data for vision LLM
 
 ### Phase 1 — Audio Transcription
-- [ ] Auto-start Whisper transcription loop on app launch
-- [ ] Feed mic input → Whisper → rolling buffer (currently manual script in `backend/transcription/whisper_stream.py`)
+- [x] Auto-start Whisper transcription loop on app launch (in-process thread, not a subprocess)
+- [x] Feed mic input → Whisper → rolling buffer
+- [ ] Verify actually works end-to-end on a normal (non-3.14) Python / real Windows machine — this dev sandbox can only confirm graceful degradation, not a working transcript
 - [ ] Optional: system-audio loopback (hear the call participant) — macOS BlackHole, Windows WASAPI, Linux PulseAudio
 
 ### Phase 2 — Settings UI
-- [ ] Settings panel: API key input, provider selection, hotkey customization, mic device picker
-- [ ] Persist settings to local SQLite
-- [ ] Hot-switch LLM providers without restart
+- [x] Settings panel: API key input (BYOK), provider selection
+- [x] Persist settings (`userData/settings.json`, not SQLite — simpler, and it's config not session data)
+- [x] Hot-switch LLM providers without restart (backend auto-restarts on Save)
+- [ ] Hotkey customization
+- [ ] Mic device picker
+- [ ] Model picker for OpenRouter/Ollama (currently env-var only: `WISP_OPENROUTER_MODEL`)
+- [ ] `WISP_WHISPER_ENABLED` toggle in the UI (currently `.env`-only)
 
 ### Phase 3 — Provider Implementations
-- [ ] OpenAI provider: verify streaming works
-- [ ] Gemini provider: verify streaming works (may need different API format)
-- [ ] Ollama provider: wire up to local model server
+- [x] OpenAI provider: implemented
+- [x] Gemini provider: implemented (was advertised but missing until this session)
+- [x] OpenRouter provider: implemented (one key, many models, reuses the OpenAI SDK)
+- [x] Ollama provider: implemented, base URL configurable via Settings
 
 ### Phase 4 — More Playbooks
 - [ ] "Interview" playbook (focus on technical Q&A)

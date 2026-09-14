@@ -42,11 +42,16 @@
     "directories": { "output": "release" },
     "files": ["dist/**/*", "package.json"],
     "publish": null,
+    "icon": "build/icon.png",
     "extraResources": [
       {
         "from": "dist-backend/wisp-backend",
         "to": "backend",
         "filter": ["**/*"]
+      },
+      {
+        "from": "build/icon.png",
+        "to": "build/icon.png"
       }
     ],
     "mac": {

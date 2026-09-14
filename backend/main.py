@@ -1,9 +1,7 @@
 import atexit
 import os
-import subprocess
-import sys
+import threading
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -23,62 +21,82 @@ WHISPER_MODEL = os.getenv("WISP_WHISPER_MODEL", "base.en")
 DEFAULT_PROVIDER = os.getenv("WISP_PROVIDER", "anthropic")
 DEFAULT_PLAYBOOK = os.getenv("WISP_PLAYBOOK", "general")
 
-_transcription_process: subprocess.Popen | None = None
+_transcription_thread: threading.Thread | None = None
+_transcription_stop = threading.Event()
 _session_id: int | None = None
 
 
-def _start_transcription_subprocess():
+def _start_transcription_thread(on_transcript):
     """
-    Spawns backend/transcription/whisper_stream.py as a separate OS process
-    rather than an asyncio task. The whisper loop is fully synchronous
-    (blocking sounddevice callback + CPU-bound model.transcribe) -- running
-    it in-process would stall the FastAPI event loop and delay /capture
-    responses. It talks back to us over HTTP (POST /transcript), same as if
-    a developer ran it manually, so no other wiring is needed here.
+    Runs the whisper loop on a background OS thread, not a subprocess.
+
+    A subprocess launched via `[sys.executable, "whisper_stream.py"]` is
+    broken inside the PyInstaller-frozen backend: sys.executable there
+    points at the frozen backend binary itself (there is no separate
+    python.exe bundled), so that exec silently fails to do what a dev
+    machine's real Python would do. Tried this the subprocess way first;
+    see docs/memory.md for the full story.
+
+    A thread avoids that entirely and is safe here because the loop's real
+    work -- sounddevice's blocking read + faster-whisper's CPU-bound
+    model.transcribe() -- happens in C/numpy code that releases the GIL,
+    so it doesn't meaningfully stall the FastAPI event loop running on the
+    main thread.
+
+    The import of whisper_stream happens IN HERE, not at module level --
+    sounddevice/faster-whisper pull in native deps (PortAudio, a PyAV/
+    ffmpeg chain) that may not be present on every machine this backend
+    runs on. A module-level import would take the whole backend down with
+    an ImportError before the FastAPI app even starts, turning a missing
+    optional feature into a total outage of the core screenshot -> LLM
+    loop, which needs no audio at all. Learned this the hard way -- see
+    docs/memory.md.
     """
-    global _transcription_process
+    global _transcription_thread
     if not WHISPER_ENABLED:
         print("[wisp] Whisper transcription disabled (WISP_WHISPER_ENABLED=false)")
         return
-    script = Path(__file__).parent / "transcription" / "whisper_stream.py"
     try:
-        _transcription_process = subprocess.Popen(
-            [sys.executable, str(script), WHISPER_MODEL],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+        from transcription.whisper_stream import run as run_whisper
+
+        _transcription_thread = threading.Thread(
+            target=run_whisper,
+            args=(WHISPER_MODEL, on_transcript, _transcription_stop),
+            daemon=True,
         )
-        print(f"[wisp] Started transcription subprocess (pid={_transcription_process.pid}, model={WHISPER_MODEL})")
+        _transcription_thread.start()
+        print(f"[wisp] Started transcription thread (model={WHISPER_MODEL})")
     except Exception as e:
         # Non-fatal: the capture loop (screenshot -> LLM) works fine without
         # audio context, just with an empty transcript_context.
-        print(f"[wisp] Failed to start transcription subprocess: {e}. "
-              f"Continuing without audio context.", file=sys.stderr)
+        print(f"[wisp] Failed to start transcription thread: {e}. "
+              f"Continuing without audio context.")
 
 
-def _stop_transcription_subprocess():
-    global _transcription_process
-    if _transcription_process and _transcription_process.poll() is None:
-        _transcription_process.terminate()
-        try:
-            _transcription_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _transcription_process.kill()
-        print("[wisp] Stopped transcription subprocess")
+def _stop_transcription_thread():
+    if _transcription_thread and _transcription_thread.is_alive():
+        _transcription_stop.set()
+        _transcription_thread.join(timeout=5)
+        print("[wisp] Stopped transcription thread")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _session_id
     _session_id = db.start_session(playbook=DEFAULT_PLAYBOOK)
-    _start_transcription_subprocess()
+
+    def on_transcript(text: str):
+        transcript_buffer.add(text)
+        if _session_id is not None:
+            db.save_transcript_chunk(session_id=_session_id, text=text)
+
+    _start_transcription_thread(on_transcript)
     yield
-    _stop_transcription_subprocess()
+    _stop_transcription_thread()
 
 
 app = FastAPI(title="wisp-backend", lifespan=lifespan)
-atexit.register(_stop_transcription_subprocess)
+atexit.register(_stop_transcription_thread)
 
 # Backend only ever talks to the local Electron shell -- CORS is wide open
 # here because it's bound to 127.0.0.1 only (see __main__ below), not because

@@ -5,6 +5,7 @@ declare global {
     wisp: {
       getBackendUrl: () => Promise<string>;
       onCaptureTriggered: (cb: (payload: { image: string; backendUrl: string }) => void) => void;
+      openSettings: () => Promise<void>;
     };
   }
 }
@@ -67,8 +68,37 @@ export function Overlay() {
         overflowY: 'auto',
       } as React.CSSProperties}
     >
-      <div style={{ opacity: 0.6, fontSize: 11, marginBottom: 8, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        wisp — {status} — ⌘⏎ to capture, ⌘\ to hide
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          opacity: 0.6,
+          fontSize: 11,
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          wisp — {status} — ⌘⏎ to capture, ⌘\ to hide
+        </span>
+        <button
+          onClick={() => window.wisp.openSettings()}
+          title="Settings"
+          style={
+            {
+              WebkitAppRegion: 'no-drag',
+              background: 'transparent',
+              border: 'none',
+              color: 'inherit',
+              opacity: 0.8,
+              cursor: 'pointer',
+              fontSize: 13,
+              padding: 2,
+            } as React.CSSProperties
+          }
+        >
+          ⚙
+        </button>
       </div>
       <div style={{ whiteSpace: 'pre-wrap', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         {response || 'Waiting for capture...'}
