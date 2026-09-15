@@ -26,10 +26,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
+      # github-hosted ubuntu-latest runners ship a full Android SDK already
+      # (cmdline-tools + a range of platforms/build-tools pre-cached under
+      # $ANDROID_HOME) -- android-actions/setup-android@v3 was tried first
+      # and failed trying to fetch the long-removed legacy 'tools' package
+      # (`sdkmanager tools` -> "Warning: Failed to find package 'tools'" ->
+      # nonzero exit), so this skips that action entirely and just asks the
+      # runner's own sdkmanager for the one platform/build-tools pair this
+      # project needs.
       - name: Install Android platform + build-tools
-        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
