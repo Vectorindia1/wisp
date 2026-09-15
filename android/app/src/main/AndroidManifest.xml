@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Floating overlay window, the mobile equivalent of the desktop app's
+         always-on-top BrowserWindow (src/main/main.ts's createOverlayWindow). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Mic input for TranscriptionManager (see its class doc for why this
+         uses SpeechRecognizer rather than a bundled whisper.cpp). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- OverlayService must run as a foreground service to hold a
+         MediaProjection across screenshots and to keep the overlay window
+         alive while the app isn't in the foreground itself. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 13+ requires runtime consent to show the foreground
+         service's persistent notification. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Wisp"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Wisp">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Wisp" />
+
+        <!-- foregroundServiceType must list every capability this service
+             actually uses concurrently: mediaProjection for screenshots,
+             microphone for the transcription loop. Android 14 (API 34)
+             enforces this list strictly -- omitting one and using it anyway
+             throws a SecurityException at runtime, not a compile error, so
+             this needs to be verified for real (see android/README.md's
+             untested-claims list; can't be exercised without a device). -->
+        <service
+            android:name=".OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection|microphone" />
+
+    </application>
+</manifest>

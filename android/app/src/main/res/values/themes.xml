@@ -1,0 +1,9 @@
+<resources>
+    <!-- Dark-first theme matching the desktop overlay's look (Overlay.tsx's
+         rgba(20,20,22,0.78) + the #6d5bd0 accent used in Settings.tsx). -->
+    <style name="Theme.Wisp" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorBackground">#18181B</item>
+        <item name="android:statusBarColor">#18181B</item>
+        <item name="android:windowBackground">#18181B</item>
+    </style>
+</resources>

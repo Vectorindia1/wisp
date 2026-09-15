@@ -1,0 +1,45 @@
+name: Build Android
+
+# No local Gradle/Android-platform install exists in the dev sandbox this
+# project was built in (no emulator or device either) -- this workflow is
+# the actual verification that the Kotlin compiles and Gradle can produce
+# an APK at all, not just a convenience. See android/README.md.
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android platform + build-tools
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Assemble debug APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisp-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Wisp</string>
+    <string name="overlay_channel_name">Wisp Overlay</string>
+    <string name="overlay_notification_text">Wisp is running — tap to open Settings</string>
+</resources>
