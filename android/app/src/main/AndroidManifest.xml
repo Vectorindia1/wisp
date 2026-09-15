@@ -42,7 +42,7 @@
         <!-- foregroundServiceType must list every capability this service
              actually uses concurrently: mediaProjection for screenshots,
              microphone for the transcription loop. Android 14 (API 34)
-             enforces this list strictly -- omitting one and using it anyway
+             enforces this list strictly: omitting one and using it anyway
              throws a SecurityException at runtime, not a compile error, so
              this needs to be verified for real (see android/README.md's
              untested-claims list; can't be exercised without a device). -->
